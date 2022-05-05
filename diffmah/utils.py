@@ -1,9 +1,7 @@
+"""Utility functions used throughout the package."""
 import numpy as np
 from jax import numpy as jnp
-from jax import value_and_grad
-from jax import jit as jjit
-from jax.experimental import optimizers as jax_opt
-from collections import OrderedDict
+from jax.example_libraries import optimizers as jax_opt
 
 
 def get_1d_arrays(*args, jax_arrays=False):
@@ -72,61 +70,8 @@ def jax_inverse_sigmoid(y, x0, k, ylo, yhi):
     return x0 - jnp.log(lnarg) / k
 
 
-@jjit
-def _jax_triweight_sigmoid_kernel(y):
-    val = jnp.where(
-        y < 3,
-        -5 * y ** 7 / 69984
-        + 7 * y ** 5 / 2592
-        - 35 * y ** 3 / 864
-        + 35 * y / 96
-        + 1 / 2,
-        1,
-    )
-    return jnp.where(y > -3, val, 0)
-
-
-@jjit
-def _jax_tw_cuml_kern(x, m, h):
-    y = (x - m) / h
-    v = -5 * y ** 7 / 69984 + 7 * y ** 5 / 2592 - 35 * y ** 3 / 864 + 35 * y / 96 + 0.5
-    res = jnp.where(y < -3, 0, v)
-    res = jnp.where(y > 3, 1, res)
-    return res
-
-
-def _enforce_no_extraneous_keywords(defaults, **kwargs):
-    unrecognized_params = set(kwargs) - set(defaults)
-
-    if len(unrecognized_params) > 0:
-        param = list(unrecognized_params)[0]
-        raise KeyError("Unrecognized parameter ``{0}``".format(param))
-
-
-def _get_param_dict(defaults, strict=False, **kwargs):
-    """
-    """
-    param_dict = OrderedDict(
-        [(key, kwargs.get(key, val)) for key, val in defaults.items()]
-    )
-    if strict:
-        _enforce_no_extraneous_keywords(defaults, **kwargs)
-    return param_dict
-
-
-def _get_param_array(defaults, strict=False, dtype="f4", jax_arrays=True, **kwargs):
-    """
-    """
-    param_dict = _get_param_dict(defaults, strict=strict, **kwargs)
-    if jax_arrays:
-        param_array = jnp.array(list(param_dict.values())).astype(dtype)
-    else:
-        param_array = np.array(list(param_dict.values())).astype(dtype)
-    return param_array
-
-
 def jax_adam_wrapper(
-    loss_func,
+    loss_and_grad_func,
     params_init,
     loss_data,
     n_step,
@@ -143,11 +88,10 @@ def jax_adam_wrapper(
 
     Parameters
     ----------
-    loss_func : callable
+    loss_and_grad_func : callable
         Differentiable function to minimize.
 
-        Must accept inputs (params, data) and return a scalar,
-        and be differentiable using jax.grad.
+        Must accept inputs (params, data) and return a scalar and its gradients
 
     params_init : ndarray of shape (n_params, )
         Initial guess at the parameters
@@ -197,7 +141,11 @@ def jax_adam_wrapper(
     p_init = np.copy(params_init)
     for i in range(n_warmup):
         p_init = _jax_adam_wrapper(
-            loss_func, p_init, loss_data, warmup_n_step, step_size=warmup_step_size
+            loss_and_grad_func,
+            p_init,
+            loss_data,
+            warmup_n_step,
+            step_size=warmup_step_size,
         )[0]
 
     if np.all(np.isfinite(p_init)):
@@ -205,7 +153,9 @@ def jax_adam_wrapper(
     else:
         p0 = params_init
 
-    _res = _jax_adam_wrapper(loss_func, p0, loss_data, n_step, step_size=step_size)
+    _res = _jax_adam_wrapper(
+        loss_and_grad_func, p0, loss_data, n_step, step_size=step_size
+    )
     if len(_res[2]) < n_step:
         fit_terminates = 0
     else:
@@ -213,7 +163,9 @@ def jax_adam_wrapper(
     return (*_res, fit_terminates)
 
 
-def _jax_adam_wrapper(loss_func, params_init, loss_data, n_step, step_size=0.01):
+def _jax_adam_wrapper(
+    loss_and_grad_func, params_init, loss_data, n_step, step_size=0.01
+):
     """Convenience function wrapping JAX's Adam optimizer used to
     minimize the loss function loss_func.
 
@@ -222,11 +174,10 @@ def _jax_adam_wrapper(loss_func, params_init, loss_data, n_step, step_size=0.01)
 
     Parameters
     ----------
-    loss_func : callable
+    loss_and_grad_func : callable
         Differentiable function to minimize.
 
-        Must accept inputs (params, data) and return a scalar,
-        and be differentiable using jax.grad.
+        Must accept inputs (params, data) and return a scalar loss and its gradients
 
     params_init : ndarray of shape (n_params, )
         Initial guess at the parameters
@@ -265,7 +216,7 @@ def _jax_adam_wrapper(loss_func, params_init, loss_data, n_step, step_size=0.01)
     for istep in range(n_step):
         p = np.array(get_params(opt_state))
 
-        loss, grads = value_and_grad(loss_func, argnums=0)(p, loss_data)
+        loss, grads = loss_and_grad_func(p, loss_data)
 
         no_nan_params = np.all(np.isfinite(p))
         no_nan_loss = np.isfinite(loss)

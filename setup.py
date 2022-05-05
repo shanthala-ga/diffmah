@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 
 PACKAGENAME = "diffmah"
-VERSION = "0.0.dev"
+VERSION = "0.2.0"
 
 
 setup(
@@ -10,10 +10,10 @@ setup(
     version=VERSION,
     author="Andrew Hearin",
     author_email="ahearin@anl.gov",
-    description="Some package",
-    long_description="Just some package",
-    install_requires=["numpy"],
+    description="Differentiable model of dark matter halo assembly",
+    long_description="Differentiable model of dark matter halo assembly",
+    install_requires=["numpy", "jax"],
     packages=find_packages(),
-    url="https://github.com/aphearin/diffmah",
-    package_data={"diffmah": ("data/*.dat",)},
+    url="https://github.com/ArgonneCPAC/diffmah",
+    package_data={"diffmah": ("data/*.dat", "tests/testing_data/*.dat")},
 )
